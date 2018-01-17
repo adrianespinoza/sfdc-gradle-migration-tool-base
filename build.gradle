@@ -1,0 +1,100 @@
+apply plugin: "java"
+apply plugin: "eclipse"
+apply plugin: "maven"
+
+defaultTasks "jar"
+
+// more defaults
+defaultTasks "deploy"
+
+def sfDeployDirectory = "sfdeploypkg"
+def sfUndeployDirectory = "sfremovepkg"
+def props = new Properties()
+
+repositories {
+    mavenCentral()
+}
+
+def dependenciesDir = "$buildDir/libs/lib"
+
+// this is the build number for automated builds
+def buildNumber = System.getenv()["BUILD_NUMBER"]
+if (buildNumber == null || buildNumber.isEmpty()) {
+    buildNumber = "handmade"
+}
+
+configurations {
+  salesforceAnt {description = "Salesforce Ant tasks"}
+}
+
+// define main dependencies to authenticate from the repos
+dependencies {
+    salesforceAnt files("lib/ant-salesforce.jar")
+}
+
+// salesforce tasks
+task prepare << {
+    props.load(new FileInputStream("build.properties"))
+    //mkdir (dir: sfDeployDirectory)
+    ext.sfJarPath = configurations.salesforceAnt.getAsPath()
+
+    ext.sfTasks = [ "deploy": "DeployTask",
+                    "retrieve": "RetrieveTask",
+                    "listMetadata": "ListMetadataTask",
+                    "describeMetadata": "DescribeMetadataTask" ];
+    sfTasks.each { name, clazz -> ant.taskdef (name:name, classname:"com.salesforce.ant.${clazz}", classpath: sfJarPath) }
+}
+
+
+// copy external dependencies into lib directory
+copy {
+  into dependenciesDir
+  from configurations.runtime
+}
+
+task deploy(dependsOn: prepare) << {
+    ant{
+        sf = deploy ( username: props.getProperty("sf.username"),
+                    password: props.getProperty("sf.password"),
+                    serverurl: props.getProperty("sf.serverurl"),
+                    maxPoll: props.getProperty("sf.maxPoll"),
+                    deployRoot: sfDeployDirectory)
+    }
+}
+
+task undeploy (dependsOn: prepare) << {
+    ant{
+        sf = deploy ( username: props.getProperty("sf.username"),
+                    password: props.getProperty("sf.password"),
+                    serverurl: props.getProperty("sf.serverurl"),
+                    maxPoll: props.getProperty("sf.maxPoll"),
+                    deployRoot: sfUndeployDirectory)
+    }
+}
+
+task retrieve(dependsOn: prepare) << {
+    delete "retrieveOutput"
+    ext.retrieveDir = file("retrieveOutput")
+    ext.retrieveDir.mkdirs()
+    ant {
+        sf = retrieve ( username: props.getProperty("sf.username"),
+                      password: props.getProperty("sf.password"),
+                      serverurl: props.getProperty("sf.serverurl"),
+                      retrieveTarget: "retrieveOutput",
+                      packageNames: "MyPkg")
+    }
+    println "RETRIEVED IN retrieveOutput FOLDER."
+}
+
+task retrieveUnpackaged (dependsOn: prepare) << {
+    ext.retrieveDir = file("retrieveUnpackaged")
+    ext.retrieveDir.mkdirs()
+    ant{
+        sf = retrieve ( username: props.getProperty("sf.username"),
+                    password: props.getProperty("sf.password"),
+                    serverurl: props.getProperty("sf.serverurl"),
+                    maxPoll: props.getProperty("sf.maxPoll"),
+                    retrieveTarget: "retrieveUnpackaged",
+                    unpackaged: "unpackaged/package.xml")
+    }
+}
